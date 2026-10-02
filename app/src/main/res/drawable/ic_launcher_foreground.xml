@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Sophisticated background glowing circle accent -->
+    <path
+        android:fillColor="#10FFFFFF"
+        android:pathData="M54,54 m-28,0 a28,28 0 1,1 56,0 a28,28 0 1,1 -56,0" />
+
+    <!-- Center Hub of Connection (Interlinked node circles) -->
+    <!-- Center Circle -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,54 m-12,0 a12,12 0 1,1 24,0 a12,12 0 1,1 -24,0" />
+    <path
+        android:fillColor="#4F46E5"
+        android:pathData="M54,54 m-6,0 a6,6 0 1,1 12,0 a6,6 0 1,1 -12,0" />
+
+    <!-- Six Symmetric Connector nodes representing MCP Server endpoints -->
+    <!-- Node Top -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,42 L54,26" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M54,24 m-4,0 a4,4 0 1,1 8,0 a4,4 0 1,1 -8,0" />
+
+    <!-- Node Bottom -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,66 L54,82" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M54,84 m-4,0 a4,4 0 1,1 8,0 a4,4 0 1,1 -8,0" />
+
+    <!-- Node Top-Left -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M43.6,48 L29.7,40" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M28,39 m-4,0 a4,4 0 1,1 8,0 a4,4 0 1,1 -8,0" />
+
+    <!-- Node Bottom-Left -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M43.6,60 L29.7,68" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M28,69 m-4,0 a4,4 0 1,1 8,0 a4,4 0 1,1 -8,0" />
+
+    <!-- Node Top-Right -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M64.4,48 L78.3,40" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M80,39 m-4,0 a4,4 0 1,1 8,0 a4,4 0 1,1 -8,0" />
+
+    <!-- Node Bottom-Right -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M64.4,60 L78.3,68" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M80,69 m-4,0 a4,4 0 1,1 8,0 a4,4 0 1,1 -8,0" />
+
+</vector>

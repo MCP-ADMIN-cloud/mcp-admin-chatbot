@@ -1,0 +1,6 @@
+{
+  "name": "MCP Chatbot",
+  "description": "Chat with your MCP servers using cloud LLMs. An open-source multi-modal client powered by Zyven Technologies.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
