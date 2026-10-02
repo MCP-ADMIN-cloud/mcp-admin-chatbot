@@ -27,6 +27,14 @@ class EncryptedStorage(context: Context) {
         prefs.edit().remove("cred_$key").apply()
     }
 
+    fun saveStringSetting(key: String, value: String) {
+        prefs.edit().putString("setting_$key", value).apply()
+    }
+
+    fun getStringSetting(key: String, defaultValue: String): String {
+        return prefs.getString("setting_$key", defaultValue) ?: defaultValue
+    }
+
     private fun obfuscate(input: String): String {
         if (input.isEmpty()) return ""
         val bytes = input.toByteArray(StandardCharsets.UTF_8)

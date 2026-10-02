@@ -9,6 +9,9 @@ import com.example.data.db.entity.ChatSessionEntity
 import com.example.data.db.entity.McpServerEntity
 import com.example.data.db.entity.McpToolEntity
 import com.example.data.db.entity.ProviderKeyEntity
+import com.example.data.llm.DEFAULT_MODEL_NAME
+import com.example.data.llm.DEFAULT_PROVIDER_ID
+import com.example.data.llm.LlmProvider
 import com.example.data.llm.LlmService
 import com.example.data.llm.StreamChunk
 import com.example.data.llm.ToolCallInfo
@@ -18,6 +21,7 @@ import com.example.data.repository.ChatRepository
 import com.example.data.secure.EncryptedStorage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -69,6 +73,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val activeContextTurns = MutableStateFlow(16)
     val maxContextTokens = MutableStateFlow(32000)
 
+    private val _fetchedModels = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    val fetchedModels: StateFlow<Map<String, List<String>>> = _fetchedModels.asStateFlow()
+
+    private val _isFetchingModels = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val isFetchingModels: StateFlow<Map<String, Boolean>> = _isFetchingModels.asStateFlow()
+
+    fun loadModelsForProvider(providerId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isFetchingModels.update { it + (providerId to true) }
+            val key = encryptedStorage.getCredential(providerId) ?: ""
+            val models = llmService.fetchModelsDynamically(providerId, key)
+            if (models.isNotEmpty()) {
+                _fetchedModels.update { it + (providerId to models) }
+            }
+            _isFetchingModels.update { it + (providerId to false) }
+        }
+    }
+
     private var streamJob: Job? = null
 
     init {
@@ -81,10 +103,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (sessions.isNotEmpty()) {
                         selectSession(sessions.first().id)
                     } else {
+                        val (initialProvider, initialModel) = getInitialSessionSettings()
+
                         val newId = chatRepository.createNewSession(
                             title = "MCP Chatbot AI Assistant",
-                            providerId = "gemini",
-                            modelName = "gemini-2.5-flash"
+                            providerId = initialProvider,
+                            modelName = initialModel
                         )
                         selectSession(newId)
                     }
@@ -104,9 +128,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun getInitialSessionSettings(): Pair<String, String> {
+        val savedProvider = encryptedStorage.getStringSetting("last_provider_id", "")
+        val savedModel = encryptedStorage.getStringSetting("last_model_name", "")
+        if (savedProvider.isNotBlank() && savedModel.isNotBlank()) {
+            return Pair(savedProvider, savedModel)
+        }
+        val activeProvider = LlmProvider.entries.firstOrNull { isProviderConfigured(it.id) }
+        val initialProvider = activeProvider?.id ?: DEFAULT_PROVIDER_ID
+        val initialModel = activeProvider?.defaultModel ?: DEFAULT_MODEL_NAME
+        return Pair(initialProvider, initialModel)
+    }
+
     fun createNewSession(title: String = "New Conversation") {
         viewModelScope.launch(Dispatchers.IO) {
-            val newId = chatRepository.createNewSession(title = title)
+            val (initialProvider, initialModel) = getInitialSessionSettings()
+            val newId = chatRepository.createNewSession(
+                title = title,
+                providerId = initialProvider,
+                modelName = initialModel
+            )
             selectSession(newId)
         }
     }
@@ -126,6 +167,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
         _currentSession.value = updated
         activeContextTurns.value = turnsLimit
+        encryptedStorage.saveStringSetting("last_provider_id", providerId)
+        encryptedStorage.saveStringSetting("last_model_name", modelName)
         viewModelScope.launch(Dispatchers.IO) {
             chatRepository.updateSession(updated)
         }
@@ -191,80 +234,100 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         isStreaming.value = true
 
         streamJob = viewModelScope.launch(Dispatchers.IO) {
-            val session = chatRepository.getSessionById(sessionId) ?: return@launch
-            val messages = chatRepository.getMessagesListForSession(sessionId)
-            val tools = mcpTools.value
+            try {
+                var loopCount = 0
+                var shouldContinue = true
+                var assistantMsgId: String? = null
 
-            val contextMessages = messages.takeLast(session.contextWindowSize * 2)
+                while (shouldContinue && loopCount < 5) {
+                    loopCount++
+                    val session = chatRepository.getSessionById(sessionId) ?: break
+                    val messages = chatRepository.getMessagesListForSession(sessionId)
+                    val tools = mcpTools.value
+                    val contextMessages = messages.takeLast(session.contextWindowSize * 2)
 
-            val assistantMsgId = chatRepository.addMessage(
-                sessionId = sessionId,
-                sender = "ASSISTANT",
-                content = "Thinking..."
-            )
+                    if (assistantMsgId == null) {
+                        assistantMsgId = chatRepository.addMessage(
+                            sessionId = sessionId,
+                            sender = "ASSISTANT",
+                            content = "Thinking..."
+                        )
+                    }
 
-            var accumulatedText = ""
-            var currentToolCall: ToolCallInfo? = null
+                    var currentToolCall: ToolCallInfo? = null
+                    var accumulatedText = ""
+                    var hasToolCallInThisTurn = false
 
-            llmService.generateStreamResponse(
-                providerId = session.providerId,
-                modelName = session.modelName,
-                systemPrompt = session.systemPrompt,
-                messages = contextMessages,
-                availableTools = tools
-            ).collect { chunk ->
-                if (chunk.toolCallRequest != null) {
-                    currentToolCall = chunk.toolCallRequest
-                    val toolJson = JSONObject().apply {
-                        put("toolName", currentToolCall!!.toolName)
-                        put("arguments", currentToolCall!!.argumentsJson)
-                        put("status", "EXECUTING")
-                    }.toString()
+                    llmService.generateStreamResponse(
+                        providerId = session.providerId,
+                        modelName = session.modelName,
+                        systemPrompt = session.systemPrompt,
+                        messages = contextMessages,
+                        availableTools = tools
+                    ).collect { chunk ->
+                        if (chunk.toolCallRequest != null) {
+                            currentToolCall = chunk.toolCallRequest
+                            hasToolCallInThisTurn = true
+                        } else if (chunk.textDelta.isNotEmpty()) {
+                            accumulatedText += chunk.textDelta
+                            chatRepository.updateMessageContent(
+                                messageId = assistantMsgId!!,
+                                sessionId = sessionId,
+                                sender = "ASSISTANT",
+                                content = accumulatedText
+                            )
+                        }
+                    }
 
-                    chatRepository.updateMessageContent(
-                        messageId = assistantMsgId,
-                        sessionId = sessionId,
-                        sender = "ASSISTANT",
-                        content = "Calling MCP tool `${currentToolCall!!.toolName}`...",
-                        toolCallJson = toolJson
-                    )
+                    if (hasToolCallInThisTurn && currentToolCall != null) {
+                        val toolJson = JSONObject().apply {
+                            put("toolName", currentToolCall!!.toolName)
+                            put("arguments", currentToolCall!!.argumentsJson)
+                            put("status", "EXECUTING")
+                        }.toString()
 
-                    val toolResult = mcpRepository.executeTool(
-                        toolName = currentToolCall!!.toolName,
-                        argumentsJson = currentToolCall!!.argumentsJson
-                    )
+                        chatRepository.updateMessageContent(
+                            messageId = assistantMsgId!!,
+                            sessionId = sessionId,
+                            sender = "ASSISTANT",
+                            content = "Calling MCP tool `${currentToolCall!!.toolName}`...",
+                            toolCallJson = toolJson
+                        )
 
-                    val updatedToolJson = JSONObject().apply {
-                        put("toolName", currentToolCall!!.toolName)
-                        put("arguments", currentToolCall!!.argumentsJson)
-                        put("status", if (toolResult.isError) "FAILED" else "SUCCESS")
-                        put("result", toolResult.outputText)
-                    }.toString()
+                        val toolResult = mcpRepository.executeTool(
+                            toolName = currentToolCall!!.toolName,
+                            argumentsJson = currentToolCall!!.argumentsJson
+                        )
 
-                    val toolResultContent = "Tool Execution Complete:\n\n${toolResult.outputText}"
+                        val updatedToolJson = JSONObject().apply {
+                            put("toolName", currentToolCall!!.toolName)
+                            put("arguments", currentToolCall!!.argumentsJson)
+                            put("status", if (toolResult.isError) "FAILED" else "SUCCESS")
+                            put("result", toolResult.outputText)
+                        }.toString()
 
-                    chatRepository.updateMessageContent(
-                        messageId = assistantMsgId,
-                        sessionId = sessionId,
-                        sender = "ASSISTANT",
-                        content = toolResultContent,
-                        toolCallJson = updatedToolJson,
-                        toolResultJson = toolResult.rawResultJson
-                    )
+                        val toolResultContent = "Called MCP tool `${currentToolCall!!.toolName}`.\n\nResult:\n${toolResult.outputText}"
 
-                } else if (chunk.textDelta.isNotEmpty()) {
-                    accumulatedText += chunk.textDelta
-                    chatRepository.updateMessageContent(
-                        messageId = assistantMsgId,
-                        sessionId = sessionId,
-                        sender = "ASSISTANT",
-                        content = accumulatedText
-                    )
+                        chatRepository.updateMessageContent(
+                            messageId = assistantMsgId!!,
+                            sessionId = sessionId,
+                            sender = "ASSISTANT",
+                            content = toolResultContent,
+                            toolCallJson = updatedToolJson,
+                            toolResultJson = toolResult.rawResultJson
+                        )
+
+                        // Clear current message to trigger a fresh assistant message for the next answer turn
+                        assistantMsgId = null
+                        delay(500)
+                    } else {
+                        shouldContinue = false
+                    }
                 }
-
-                if (chunk.isDone) {
-                    isStreaming.value = false
-                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                isStreaming.value = false
             }
         }
     }
@@ -319,21 +382,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun initializeDefaultProvidersIfEmpty() {
         val providers = db.providerDao().getAllProviders().firstOrNull() ?: emptyList()
         if (providers.isEmpty()) {
-            val defaultList = listOf(
-                ProviderKeyEntity("gemini", "Google Gemini", "", false, "gemini-2.5-flash", "gemini-2.5-flash,gemini-2.5-pro,gemini-1.5-pro"),
-                ProviderKeyEntity("openai", "OpenAI GPT", "", false, "gpt-4o", "gpt-4o,gpt-4o-mini,o3-mini"),
-                ProviderKeyEntity("claude", "Anthropic Claude", "", false, "claude-3-5-sonnet-20241022", "claude-3-5-sonnet-20241022,claude-3-5-haiku-20241022"),
-                ProviderKeyEntity("openrouter", "OpenRouter", "", false, "google/gemini-2.5-flash", "google/gemini-2.5-flash,anthropic/claude-3.5-sonnet,deepseek/deepseek-r1")
-            )
+            val defaultList = LlmProvider.entries.map { provider ->
+                ProviderKeyEntity(
+                    providerId = provider.id,
+                    providerName = provider.displayName,
+                    apiKey = "",
+                    isEnabled = false,
+                    defaultModel = provider.defaultModel,
+                    availableModels = provider.supportedModels.joinToString(",")
+                )
+            }
             for (p in defaultList) {
                 db.providerDao().insertProvider(p)
             }
         } else {
             // Self-healing migration for existing databases:
             // If Gemini is marked enabled but no key actually exists in storage, disable it.
-            val geminiProvider = providers.find { it.providerId == "gemini" }
+            val geminiProvider = providers.find { it.providerId == DEFAULT_PROVIDER_ID }
             if (geminiProvider != null && geminiProvider.isEnabled) {
-                val hasKey = !encryptedStorage.getCredential("gemini").isNullOrBlank()
+                val hasKey = !encryptedStorage.getCredential(DEFAULT_PROVIDER_ID).isNullOrBlank()
                 if (!hasKey) {
                     db.providerDao().updateProvider(geminiProvider.copy(isEnabled = false, apiKey = ""))
                 }

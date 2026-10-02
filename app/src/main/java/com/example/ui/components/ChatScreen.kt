@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import com.example.data.db.entity.ChatMessageEntity
+import com.example.data.llm.DEFAULT_MODEL_NAME
+import com.example.data.llm.DEFAULT_PROVIDER_ID
 import com.example.data.llm.LlmProvider
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.AttachmentInfo
@@ -49,6 +51,8 @@ fun ChatScreen(
     val activeContextTurns by viewModel.activeContextTurns.collectAsState()
     val maxContextTokens by viewModel.maxContextTokens.collectAsState()
     val providerKeys by viewModel.providerKeys.collectAsState()
+    val fetchedModels by viewModel.fetchedModels.collectAsState()
+    val isFetchingModels by viewModel.isFetchingModels.collectAsState()
 
     var showModelSelectorModal by remember { mutableStateOf(false) }
     var showVoiceRecorder by remember { mutableStateOf(false) }
@@ -396,6 +400,12 @@ fun ChatScreen(
                         LlmProvider.entries.filter { viewModel.isProviderConfigured(it.id) }
                     }
 
+                    LaunchedEffect(showModelSelectorModal) {
+                        configuredProviders.forEach { provider ->
+                            viewModel.loadModelsForProvider(provider.id)
+                        }
+                    }
+
                     if (configuredProviders.isEmpty()) {
                         Text(
                             text = "No model providers are configured yet. Please go to Providers screen to set up your API keys.",
@@ -403,48 +413,111 @@ fun ChatScreen(
                         )
                     } else {
                         configuredProviders.forEach { provider ->
+                            val isLoading = isFetchingModels[provider.id] ?: false
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
                                 color = if (currentSession?.providerId == provider.id) Color(0xFFE0E7FF) else Slate100,
                                 border = if (currentSession?.providerId == provider.id) androidx.compose.foundation.BorderStroke(1.5.dp, Indigo600) else null,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text(
-                                        text = provider.displayName,
-                                        style = MaterialTheme.typography.labelMedium.copy(
-                                            fontWeight = FontWeight.Bold,
-                                            color = Indigo900
-                                        )
-                                    )
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-
+                                Column(modifier = Modifier.padding(12.dp)) {
                                     Row(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        provider.supportedModels.forEach { model ->
-                                            val isSelected = currentSession?.providerId == provider.id && currentSession?.modelName == model
-                                            Button(
-                                                onClick = {
-                                                    viewModel.updateSessionSettings(
-                                                        providerId = provider.id,
-                                                        modelName = model,
-                                                        systemPrompt = currentSession?.systemPrompt ?: "System prompt",
-                                                        turnsLimit = currentSession?.contextWindowSize ?: 16
-                                                    )
-                                                    showModelSelectorModal = false
-                                                },
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = if (isSelected) Indigo600 else Color.White,
-                                                    contentColor = if (isSelected) Color.White else Slate900
-                                                ),
-                                                shape = RoundedCornerShape(6.dp),
-                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                                modifier = Modifier.padding(vertical = 2.dp)
+                                        Text(
+                                            text = provider.displayName,
+                                            style = MaterialTheme.typography.labelMedium.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                color = Indigo900
+                                            )
+                                        )
+
+                                        if (isLoading) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(12.dp),
+                                                    strokeWidth = 1.5.dp,
+                                                    color = Indigo600
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = "Loading API...",
+                                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = Slate600)
+                                                )
+                                            }
+                                        } else {
+                                            Text(
+                                                text = "Dynamic API List",
+                                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp, color = Emerald600, fontWeight = FontWeight.SemiBold)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+
+                                    // Dropdown Menu Selector
+                                    var isDropdownExpanded by remember { mutableStateOf(false) }
+                                    val models = fetchedModels[provider.id] ?: provider.supportedModels
+
+                                    Box {
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { isDropdownExpanded = true },
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = Color.White,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Slate300)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text(model, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                                                val isSelectedProvider = currentSession?.providerId == provider.id
+                                                val activeModelName = if (isSelectedProvider) (currentSession?.modelName ?: provider.defaultModel) else provider.defaultModel
+                                                Text(
+                                                    text = activeModelName,
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        color = if (isSelectedProvider) Indigo900 else Slate800,
+                                                        fontWeight = if (isSelectedProvider) FontWeight.Bold else FontWeight.Normal
+                                                    )
+                                                )
+                                                Icon(
+                                                    imageVector = Icons.Default.ArrowDropDown,
+                                                    contentDescription = "Open Dropdown Menu",
+                                                    tint = Slate600,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+
+                                        DropdownMenu(
+                                            expanded = isDropdownExpanded,
+                                            onDismissRequest = { isDropdownExpanded = false },
+                                            modifier = Modifier
+                                                .background(Color.White)
+                                        ) {
+                                            models.forEach { model ->
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Text(
+                                                            text = model,
+                                                            style = MaterialTheme.typography.bodyMedium.copy(color = Slate900)
+                                                        )
+                                                    },
+                                                    onClick = {
+                                                        viewModel.updateSessionSettings(
+                                                            providerId = provider.id,
+                                                            modelName = model,
+                                                            systemPrompt = currentSession?.systemPrompt ?: "System prompt",
+                                                            turnsLimit = currentSession?.contextWindowSize ?: 16
+                                                        )
+                                                        isDropdownExpanded = false
+                                                        showModelSelectorModal = false
+                                                    }
+                                                )
                                             }
                                         }
                                     }
@@ -595,8 +668,8 @@ fun ChatScreen(
                     onClick = {
                         showContextDialog = false
                         viewModel.updateSessionSettings(
-                            providerId = currentSession?.providerId ?: "gemini",
-                            modelName = currentSession?.modelName ?: "gemini-2.5-flash",
+                            providerId = currentSession?.providerId ?: DEFAULT_PROVIDER_ID,
+                            modelName = currentSession?.modelName ?: DEFAULT_MODEL_NAME,
                             systemPrompt = currentSession?.systemPrompt ?: "System prompt",
                             turnsLimit = turns.toInt()
                         )
@@ -714,14 +787,7 @@ fun ChatMessageItem(message: ChatMessageEntity) {
                         isError = status == "FAILED"
                     )
                 } else {
-                    Text(
-                        text = message.content,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            color = if (isUser) Color.White else Slate900,
-                            lineHeight = 20.sp,
-                            fontWeight = FontWeight.Normal
-                        )
-                    )
+                    MarkdownText(text = message.content, isUser = isUser)
                 }
             }
         }
@@ -774,6 +840,288 @@ fun BrandedBanners() {
                     )
                 }
                 Icon(Icons.Default.Launch, contentDescription = "Go", tint = Indigo600, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+// ==========================================
+// Robust Native Jetpack Compose Markdown Parser
+// ==========================================
+
+sealed class MarkdownPart {
+    data class Paragraph(val lines: List<String>) : MarkdownPart()
+    data class CodeBlock(val code: String, val language: String) : MarkdownPart()
+}
+
+fun parseMarkdownBlocks(text: String): List<MarkdownPart> {
+    val parts = mutableListOf<MarkdownPart>()
+    val lines = text.split("\n")
+    var inCodeBlock = false
+    val codeContent = StringBuilder()
+    var codeLang = ""
+    val paragraphLines = mutableListOf<String>()
+
+    for (line in lines) {
+        if (line.trim().startsWith("```")) {
+            if (inCodeBlock) {
+                parts.add(MarkdownPart.CodeBlock(codeContent.toString().trimEnd(), codeLang))
+                codeContent.clear()
+                codeLang = ""
+                inCodeBlock = false
+            } else {
+                if (paragraphLines.isNotEmpty()) {
+                    parts.add(MarkdownPart.Paragraph(paragraphLines.toList()))
+                    paragraphLines.clear()
+                }
+                codeLang = line.replace("```", "").trim()
+                inCodeBlock = true
+            }
+        } else {
+            if (inCodeBlock) {
+                codeContent.append(line).append("\n")
+            } else {
+                paragraphLines.add(line)
+            }
+        }
+    }
+
+    if (inCodeBlock) {
+        parts.add(MarkdownPart.CodeBlock(codeContent.toString().trimEnd(), codeLang))
+    } else if (paragraphLines.isNotEmpty()) {
+        parts.add(MarkdownPart.Paragraph(paragraphLines.toList()))
+    }
+
+    return parts
+}
+
+fun parseInlineMarkdown(text: String): androidx.compose.ui.text.AnnotatedString {
+    return androidx.compose.ui.text.buildAnnotatedString {
+        var cursor = 0
+        while (cursor < text.length) {
+            val nextBold = text.indexOf("**", cursor)
+            val nextCode = text.indexOf("`", cursor)
+
+            if (nextBold != -1 && (nextCode == -1 || nextBold < nextCode)) {
+                append(text.substring(cursor, nextBold))
+                val endBold = text.indexOf("**", nextBold + 2)
+                if (endBold != -1) {
+                    pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold))
+                    append(text.substring(nextBold + 2, endBold))
+                    pop()
+                    cursor = endBold + 2
+                } else {
+                    append("**")
+                    cursor = nextBold + 2
+                }
+            } else if (nextCode != -1) {
+                append(text.substring(cursor, nextCode))
+                val endCode = text.indexOf("`", nextCode + 1)
+                if (endCode != -1) {
+                    pushStyle(
+                        androidx.compose.ui.text.SpanStyle(
+                            fontFamily = FontFamily.Monospace,
+                            background = Color(0x1A000000),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                    append(text.substring(nextCode + 1, endCode))
+                    pop()
+                    cursor = endCode + 1
+                } else {
+                    append("`")
+                    cursor = nextCode + 1
+                }
+            } else {
+                append(text.substring(cursor))
+                break
+            }
+        }
+    }
+}
+
+@Composable
+fun MarkdownText(text: String, isUser: Boolean) {
+    val color = if (isUser) Color.White else Slate900
+    val parts = remember(text) { parseMarkdownBlocks(text) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        parts.forEach { part ->
+            when (part) {
+                is MarkdownPart.CodeBlock -> {
+                    CodeBlockCard(part.code, part.language)
+                }
+                is MarkdownPart.Paragraph -> {
+                    part.lines.forEach { line ->
+                        when {
+                            line.startsWith("### ") -> {
+                                Text(
+                                    text = parseInlineMarkdown(line.substring(4)),
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        color = color,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    modifier = Modifier.padding(vertical = 4.dp)
+                                )
+                            }
+                            line.startsWith("## ") -> {
+                                Text(
+                                    text = parseInlineMarkdown(line.substring(3)),
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        color = color,
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    modifier = Modifier.padding(vertical = 6.dp)
+                                )
+                            }
+                            line.startsWith("# ") -> {
+                                Text(
+                                    text = parseInlineMarkdown(line.substring(2)),
+                                    style = MaterialTheme.typography.titleLarge.copy(
+                                        color = color,
+                                        fontWeight = FontWeight.ExtraBold
+                                    ),
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            }
+                            line.startsWith("* ") || line.startsWith("- ") || line.startsWith("• ") -> {
+                                val cleanLine = line.substring(2)
+                                Row(
+                                    verticalAlignment = Alignment.Top,
+                                    modifier = Modifier.padding(start = 8.dp, bottom = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "•",
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            color = color,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        modifier = Modifier.padding(end = 6.dp)
+                                    )
+                                    Text(
+                                        text = parseInlineMarkdown(cleanLine),
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            color = color,
+                                            lineHeight = 20.sp
+                                        )
+                                    )
+                                }
+                            }
+                            line.matches(Regex("^\\d+\\.\\s+.*")) -> {
+                                val dotIdx = line.indexOf(".")
+                                val num = line.substring(0, dotIdx + 1)
+                                val cleanLine = line.substring(dotIdx + 1).trim()
+                                Row(
+                                    verticalAlignment = Alignment.Top,
+                                    modifier = Modifier.padding(start = 8.dp, bottom = 2.dp)
+                                ) {
+                                    Text(
+                                        text = num,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            color = color,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        modifier = Modifier.padding(end = 6.dp)
+                                    )
+                                    Text(
+                                        text = parseInlineMarkdown(cleanLine),
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            color = color,
+                                            lineHeight = 20.sp
+                                        )
+                                    )
+                                }
+                            }
+                            else -> {
+                                if (line.isNotBlank()) {
+                                    Text(
+                                        text = parseInlineMarkdown(line),
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            color = color,
+                                            lineHeight = 20.sp,
+                                            fontWeight = FontWeight.Normal
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CodeBlockCard(code: String, language: String) {
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = Color(0xFF1E1E24),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF2E2E38))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = language.ifBlank { "code" }.uppercase(),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = Color(0xFFE2E8F0),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp
+                    )
+                )
+
+                Row(
+                    modifier = Modifier.clickable {
+                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(code))
+                    },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = "Copy code",
+                        tint = Color(0xFFCBD5E1),
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "COPY",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = Color(0xFFCBD5E1),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp
+                        )
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = code,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = Color(0xFFF8FAFC),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 16.sp
+                    )
+                )
             }
         }
     }

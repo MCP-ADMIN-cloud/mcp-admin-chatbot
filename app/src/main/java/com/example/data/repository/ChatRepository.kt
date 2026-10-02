@@ -3,6 +3,8 @@ package com.example.data.repository
 import com.example.data.db.dao.ChatDao
 import com.example.data.db.entity.ChatMessageEntity
 import com.example.data.db.entity.ChatSessionEntity
+import com.example.data.llm.DEFAULT_MODEL_NAME
+import com.example.data.llm.DEFAULT_PROVIDER_ID
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
 
@@ -24,8 +26,8 @@ class ChatRepository(val chatDao: ChatDao) {
 
     suspend fun createNewSession(
         title: String = "New Conversation",
-        providerId: String = "gemini",
-        modelName: String = "gemini-2.5-flash",
+        providerId: String = DEFAULT_PROVIDER_ID,
+        modelName: String = DEFAULT_MODEL_NAME,
         systemPrompt: String = "You are a helpful AI assistant connected to MCP (Model Context Protocol) servers."
     ): String {
         val id = "chat_" + UUID.randomUUID().toString().take(12)

@@ -486,4 +486,115 @@ class LlmService(private val encryptedStorage: EncryptedStorage) {
             }
         }
     }
+
+    fun fetchModelsDynamically(providerId: String, apiKey: String): List<String> {
+        val modelsList = mutableListOf<String>()
+        try {
+            when (providerId) {
+                "gemini" -> {
+                    if (apiKey.isNotBlank()) {
+                        val request = Request.Builder()
+                            .url("https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey")
+                            .build()
+                        httpClient.newCall(request).execute().use { response ->
+                            if (response.isSuccessful) {
+                                val bodyStr = response.body?.string()
+                                if (!bodyStr.isNullOrBlank()) {
+                                    val root = JSONObject(bodyStr)
+                                    val models = root.optJSONArray("models")
+                                    if (models != null) {
+                                        for (i in 0 until models.length()) {
+                                            val name = models.getJSONObject(i).optString("name", "")
+                                            val cleanName = name.removePrefix("models/")
+                                            if (cleanName.startsWith("gemini-") && !cleanName.contains("tuning")) {
+                                                modelsList.add(cleanName)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "openai" -> {
+                    if (apiKey.isNotBlank()) {
+                        val request = Request.Builder()
+                            .url("https://api.openai.com/v1/models")
+                            .header("Authorization", "Bearer $apiKey")
+                            .build()
+                        httpClient.newCall(request).execute().use { response ->
+                            if (response.isSuccessful) {
+                                val bodyStr = response.body?.string()
+                                if (!bodyStr.isNullOrBlank()) {
+                                    val root = JSONObject(bodyStr)
+                                    val data = root.optJSONArray("data")
+                                    if (data != null) {
+                                        for (i in 0 until data.length()) {
+                                            val id = data.getJSONObject(i).optString("id", "")
+                                            if (id.startsWith("gpt-") || id.startsWith("o1") || id.startsWith("o3-")) {
+                                                modelsList.add(id)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "openrouter" -> {
+                    val builder = Request.Builder().url("https://openrouter.ai/api/v1/models")
+                    if (apiKey.isNotBlank()) {
+                        builder.header("Authorization", "Bearer $apiKey")
+                    }
+                    httpClient.newCall(builder.build()).execute().use { response ->
+                        if (response.isSuccessful) {
+                            val bodyStr = response.body?.string()
+                            if (!bodyStr.isNullOrBlank()) {
+                                val root = JSONObject(bodyStr)
+                                val data = root.optJSONArray("data")
+                                if (data != null) {
+                                    for (i in 0 until data.length()) {
+                                        val id = data.getJSONObject(i).optString("id", "")
+                                        if (id.isNotBlank()) {
+                                            modelsList.add(id)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                "claude" -> {
+                    if (apiKey.isNotBlank()) {
+                        val request = Request.Builder()
+                            .url("https://api.anthropic.com/v1/models")
+                            .header("x-api-key", apiKey)
+                            .header("anthropic-version", "2023-06-01")
+                            .header("anthropic-beta", "models-2024-03-07")
+                            .build()
+                        httpClient.newCall(request).execute().use { response ->
+                            if (response.isSuccessful) {
+                                val bodyStr = response.body?.string()
+                                if (!bodyStr.isNullOrBlank()) {
+                                    val root = JSONObject(bodyStr)
+                                    val data = root.optJSONArray("data")
+                                    if (data != null) {
+                                        for (i in 0 until data.length()) {
+                                            val id = data.getJSONObject(i).optString("id", "")
+                                            if (id.isNotBlank()) {
+                                                modelsList.add(id)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return modelsList.distinct().sorted()
+    }
 }
